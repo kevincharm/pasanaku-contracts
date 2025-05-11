@@ -6,6 +6,8 @@ import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 import {IERC1155Receiver} from "@openzeppelin/contracts/token/ERC1155/IERC1155Receiver.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
+/// @title Pasanaku
+/// @notice A Circles v2 organisation that enables groups to form pasanakus.
 contract Pasanaku is IERC1155Receiver {
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -32,6 +34,11 @@ contract Pasanaku is IERC1155Receiver {
     /// @notice List of participants
     EnumerableSet.AddressSet private participants;
 
+    event Joined(address indexed participant);
+    event Left(address indexed participant);
+    event Contributed(address indexed participant, uint256 indexed roundId);
+    event Finalised(address indexed recipient, uint256 indexed roundId);
+
     constructor(
         string memory name,
         address hub_,
@@ -47,11 +54,24 @@ contract Pasanaku is IERC1155Receiver {
         IHub(hub).registerOrganization(name, bytes32(0));
     }
 
+    function participantAt(uint256 index) public view returns (address) {
+        return participants.at(index);
+    }
+
+    function getParticipants() public view returns (address[] memory) {
+        return participants.values();
+    }
+
     function positionOf(address participant) public view returns (uint256) {
         return
             participants._inner._positions[
                 bytes32(uint256(uint160(participant)))
             ];
+    }
+
+    function hasContributed(address participant) public view returns (bool) {
+        require(participants.contains(participant), "Not a participant");
+        return (entered >> positionOf(participant)) & 1 == 1;
     }
 
     /// @notice Join the pasanaku
@@ -61,12 +81,16 @@ contract Pasanaku is IERC1155Receiver {
 
         require(participants.length() < 256, "Too many participants");
         require(participants.add(msg.sender), "Already joined");
+
+        emit Joined(msg.sender);
     }
 
     function leave() external {
         require(participants.contains(msg.sender), "Not a participant");
         participants.remove(msg.sender);
         IHub(hub).trust(msg.sender, 0);
+
+        emit Left(msg.sender);
     }
 
     /// @notice Contribute to the current pasanaku round
@@ -92,6 +116,8 @@ contract Pasanaku is IERC1155Receiver {
         collateralAvatars[0] = msg.sender;
         IHub(hub).groupMint(group, collateralAvatars, amounts, bytes(""));
         pot += depositAmount;
+
+        emit Contributed(msg.sender, roundId);
     }
 
     /// @notice Finalise the current pasanaku round
@@ -120,6 +146,8 @@ contract Pasanaku is IERC1155Receiver {
         roundId += 1;
         entered = 0;
         pot = 0;
+
+        emit Finalised(recipient, roundId);
     }
 
     function onERC1155Received(
